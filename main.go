@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"strconv"
 
 	"github.com/ovh/go-ovh/ovh"
 	"github.com/rs/zerolog"
@@ -113,14 +114,26 @@ func main() {
 	log.Info().Msg("Successfully established connection to OVH API")
 
 	var recordsID []int
-	ticker := time.NewTicker(2 * time.Minute)
-	defer ticker.Stop()
-	for {
 
+	interval, err := getEnv("TIME_INTERVAL")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to get time interval")
+	}
+	timeInterval, err := strconv.Atoi(interval)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to convert time interval to int")
+	}
+	
+	ticker := time.NewTicker(time.Duration(timeInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
 		err = client.Get("/domain/zone/" + os.Getenv("DOMAIN") + "/record?fieldType=A", &recordsID)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get A records list")
 			continue
 		}
+		log.Info().Msg("Record list found")
+		<-ticker.C
 	}
 }
