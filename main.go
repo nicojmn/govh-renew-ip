@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -17,8 +18,7 @@ func getEnv(key string) (string, error) {
 	value := os.Getenv(key)
 
 	if value == "" {
-		log.Error().Str("key", key).Msg("Environment variable not set")
-		return "", errors.New(key + " environment variable is required")
+		return "", fmt.Errorf("%s environment variable is required", key)
 	}
 
 	return value, nil
@@ -27,25 +27,21 @@ func getEnv(key string) (string, error) {
 func getPublicIP() (string, error) {
 	resp, err := http.Get("https://api.ipify.org?format=json")
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get public IP")
 		return "", err
 	}
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Error().Int("status_code", resp.StatusCode).Msg("Failed to get public IP")
-		return "", errors.New("failed to get public IP")
+		return "", fmt.Errorf("failed to get public IP, status code : %d", resp.StatusCode)
 	}
 
 	var result map[string]string
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Error().Err(err).Msg("failed to decode public IP response")
 		return "", err
 	}
 
 	ip := result["ip"]
 	if ip == "" {
-		log.Error().Msg("Public IP not found in response")
 		return "", errors.New("public IP not found in response")
 	}
 
@@ -56,31 +52,26 @@ func getPublicIP() (string, error) {
 func NewOVHClient() (*ovh.Client, error) {
 	endpoint, err := getEnv("OVH_ENDPOINT")
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get OVH endpoint")
 		return nil, err
 	}
 
 	appKey, err := getEnv("OVH_APP_KEY")
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get OVH application key")
 		return nil, err
 	}
 
 	appSecret, err := getEnv("OVH_APP_SECRET")
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get OVH application secret")
 		return nil, err
 	}
 	
 	consumerKey, err := getEnv("OVH_CONSUMER_KEY")
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get OVH consumer key")
 		return nil, err
 	}
 
 	client, err := ovh.NewClient(endpoint, appKey, appSecret, consumerKey)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to create OVH client")
 		return nil, err
 	}
 
