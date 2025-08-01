@@ -25,7 +25,7 @@ jobs:
 
     - name: Push images
       run: |
-        docker tag db-cheatsheet:${{ github.sha }} ${{ secrets.DOCKER_USER }}/govh-renew-ip:${{ github.sha }}
-        docker tag db-cheatsheet:${{ github.sha }} ${{ secrets.DOCKER_USER }}/govh-renew-ip:latest
+        docker tag govh-renew-ip:${{ github.sha }} ${{ secrets.DOCKER_USER }}/govh-renew-ip:${{ github.sha }}
+        docker tag govh-renew-ip:${{ github.sha }} ${{ secrets.DOCKER_USER }}/govh-renew-ip:latest
         docker push ${{ secrets.DOCKER_USER }}/govh-renew-ip:${{ github.sha }}
         docker push ${{ secrets.DOCKER_USER }}/govh-renew-ip:latest
