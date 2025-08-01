@@ -5,10 +5,10 @@ services:
       dockerfile: Dockerfile
     # You can use nicojmn/govh-renew-ip:latest if you don't want to build the image
     environment:
-      - OVH_ENDPOINT=<your-zone>
-      - OVH_APP_KEY=<your-key>
-      - OVH_APP_SECRET=<secret>
-      - OVH_CONSUMER_KEY=<cons-key>
-      - TIME_INTERVAL=<time-in-second(s)>
-      - DOMAIN=example.com
+      - OVH_ENDPOINT=${OVH_ENDPOINT}
+      - OVH_APP_KEY=${OVH_APP_KEY}
+      - OVH_APP_SECRET=${OVH_APP_SECRET}
+      - OVH_CONSUMER_KEY=${OVH_CONSUMER_KEY}
+      - DOMAIN=${DOMAIN}
+      - TIME_INTERVAL=${TIME_INTERVAL}
     restart: unless-stopped
