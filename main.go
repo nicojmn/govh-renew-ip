@@ -15,12 +15,10 @@ import (
 )
 
 type Arecord struct {
-	FieldType string
-	Id        int
-	Subdomain string
-	Target    string
-	Ttl       int
-	Zone      string
+	FieldType string `json:"fieldType"`
+	Subdomain string `json:"subDomain"`
+	Target    string `json:"target"`
+	Ttl       int    `json:"ttl"`
 }
 
 func getEnv(key string) (string, error) {
@@ -109,6 +107,27 @@ func IpinRecordList(client *ovh.Client, list []int, pubIP string) bool {
 	return false
 }
 
+func addARecord(client *ovh.Client, rec Arecord) error {
+	var resp Arecord
+	err := client.Post(fmt.Sprintf("/domain/zone/%s/record", os.Getenv("DOMAIN")), rec, &resp)
+	if err != nil {
+		return err
+	}
+	err = client.Post(fmt.Sprintf("/domain/zone/%s/refresh", os.Getenv("DOMAIN")), nil, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func NewARecord(target string, ttl int) *Arecord {
+	return &Arecord{
+		FieldType: "A",
+		Target:    target,
+		Ttl:       ttl,
+	}
+}
+
 func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -168,7 +187,13 @@ func main() {
 			if IpinRecordList(client, recordsID, pubIP) {
 				log.Info().Msg("Public IP sucessfully found in A record")
 			} else {
-				// TODO : add/update A record
+				rec := NewARecord(pubIP, 0)
+				err = addARecord(client, *rec)
+				if err != nil {
+					log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+				} else {
+					log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+				}
 			}
 		}
 		<-ticker.C
