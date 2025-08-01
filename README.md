@@ -22,12 +22,11 @@ Well, if you have never heard of *a infamous Belgian ISP* (i.e. your ISP hasn't 
 
 - Docker / Compose / Swarm / Kubernetes / ...
 - OVH account
-- [OVH API credentials](https://api.ovh.com/createToken/)
+- OVH API credentials ([Find it here](https://api.ovh.com/createToken/))
 - A domain name registered with OVH
 
 ## Configuration
 
-- Find your OVH API credentials [here](https://api.ovh.com/createToken/)
 - Add the following environment variables to your docker-compose.yml file or .env file
 
 ```yaml
@@ -60,13 +59,13 @@ services:
     image: nicojmn/govh-renew-ip:dev
     container_name: renew-ip
     environment:
-      OVH_ENDPOINT: ${OVH_ENDPOINT}
-      OVH_APP_KEY: ${OVH_APP_KEY}
-      OVH_APP_SECRET: ${OVH_APP_SECRET}
-      OVH_CONSUMER_KEY: ${OVH_CONSUMER_KEY}
-      DOMAIN: ${DOMAIN}
-      TIME_INTERVAL: ${TIME_INTERVAL}
-    restart: always
+      - OVH_ENDPOINT=${OVH_ENDPOINT}
+      - OVH_APP_KEY=${OVH_APP_KEY}
+      - OVH_APP_SECRET=${OVH_APP_SECRET}
+      - OVH_CONSUMER_KEY=${OVH_CONSUMER_KEY}
+      - DOMAIN=${DOMAIN}
+      - TIME_INTERVAL=${TIME_INTERVAL}
+    restart: unless-stopped
 ```
 
 ## Building the image
@@ -76,3 +75,13 @@ If you want to build the image yourself, you can use the following command:
 ```bash
 docker build -t your_image_name .
 ```
+
+## TODO
+
+- [x] Get records ID and target IP
+- [x] Detect if the IP address is already in the A records
+- [x] Add record when the IP address is not found
+- [x] Docker setup
+- [x] Github Actions setup
+- [] Update record instead of adding it
+- [] Add support for AAAA records
