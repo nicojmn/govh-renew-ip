@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type Arecord struct {
+type record struct {
 	FieldType string `json:"fieldType"`
 	Subdomain string `json:"subDomain"`
 	Target    string `json:"target"`
@@ -31,8 +32,15 @@ func getEnv(key string) (string, error) {
 	return value, nil
 }
 
-func getPublicIP() (string, error) {
-	resp, err := http.Get("https://api.ipify.org?format=json")
+func getPublicIP(v6 bool) (string, error) {
+	var resp *http.Response
+	var err error
+	if v6 {
+		resp, err = http.Get("https://api6.ipify.org?format=json")
+	} else {
+		resp, err = http.Get("https://api.ipify.org?format=json")
+	}
+
 	if err != nil {
 		return "", err
 	}
@@ -85,8 +93,8 @@ func NewOVHClient() (*ovh.Client, error) {
 
 }
 
-func IdToIp(client *ovh.Client, id int) (string, error) {
-	var info Arecord
+func IDToIP(client *ovh.Client, id int) (string, error) {
+	var info record
 	err := client.Get(fmt.Sprintf("/domain/zone/%s/record/%d", os.Getenv("DOMAIN"), id), &info)
 	if err != nil {
 		return "", err
@@ -94,21 +102,8 @@ func IdToIp(client *ovh.Client, id int) (string, error) {
 	return info.Target, nil
 }
 
-func IpinRecordList(client *ovh.Client, list []int, pubIP string) bool {
-	for _, rec := range list {
-		recIP, err := IdToIp(client, rec)
-		if err != nil {
-			continue
-		}
-		if recIP == pubIP {
-			return true
-		}
-	}
-	return false
-}
-
-func addARecord(client *ovh.Client, rec Arecord) error {
-	var resp Arecord
+func addRecord(client *ovh.Client, rec record) error {
+	var resp record
 	err := client.Post(fmt.Sprintf("/domain/zone/%s/record", os.Getenv("DOMAIN")), rec, &resp)
 	if err != nil {
 		return err
@@ -120,12 +115,45 @@ func addARecord(client *ovh.Client, rec Arecord) error {
 	return nil
 }
 
-func NewARecord(target string, ttl int) *Arecord {
-	return &Arecord{
-		FieldType: "A",
+func NewRecord(fieldType string, target string, ttl int) *record {
+	return &record{
+		FieldType: fieldType,
 		Target:    target,
 		Ttl:       ttl,
 	}
+}
+
+func ConnAttempt(client *ovh.Client) error {
+	type PartialMe struct {
+		Firstname string `json:"firstname"`
+	}
+
+	var me PartialMe
+	err := client.Get("/me", &me)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func PollRecords(client *ovh.Client, fieldType string) ([]string, error) {
+	var recordsIDs []int
+	var IPs []string
+	err := client.Get(fmt.Sprintf("/domain/zone/%s/record?fieldType=%s", os.Getenv("DOMAIN"), fieldType), &recordsIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range recordsIDs {
+		log.Debug().Int("ID", record).Msg("Record ID found")
+		ip, err := IDToIP(client, record)
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to retrieve info for record ID : %d", record)
+		} else {
+			IPs = append(IPs, ip)
+			log.Debug().Msgf("ID : %d -> IP : %s", record, ip)
+		}
+	}
+	return IPs, nil
 }
 
 func main() {
@@ -137,25 +165,22 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to create OVH client")
 	}
 
-	pubIP, err := getPublicIP()
+	pubIPv4, err := getPublicIP(false)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to get public IP")
+		log.Error().Err(err).Msg("Failed to get public IPv4")
 	}
-
-	log.Info().Str("ip", pubIP).Msg("Public IP found")
-
-	type PartialMe struct {
-		Firstname string `json:"firstname"`
-	}
-
-	var me PartialMe
-	err = client.Get("/me", &me)
+	pubIPv6, err := getPublicIP(true)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to make request to OVH API")
+		log.Error().Err(err).Msg("Failed to get public IPv6")
 	}
-	log.Info().Str("user", me.Firstname).Msg("Successfully established connection to OVH API")
 
-	var recordsID []int
+	log.Info().Str("ip", pubIPv4).Msg("Public IPv4 found")
+
+	err = ConnAttempt(client)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to estanlished connection to OVH API")
+	}
+	log.Info().Msg("Successfully established connection to OVH API")
 
 	interval, err := getEnv("TIME_INTERVAL")
 	if err != nil {
@@ -170,30 +195,38 @@ func main() {
 	defer ticker.Stop()
 
 	for {
-		err = client.Get(fmt.Sprintf("/domain/zone/%s/record?fieldType=A", os.Getenv("DOMAIN")), &recordsID)
+		// IPv4 check
+		IPv4List, err := PollRecords(client, "A")
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get A records list")
 			continue
+		}
+		if slices.Contains(IPv4List, pubIPv4) {
+			log.Info().Msg("Public IPv4 sucessfully found in A record")
 		} else {
-			for _, record := range recordsID {
-				log.Info().Int("ID", record).Msg("Record ID found")
-				ip, err := IdToIp(client, record)
-				if err != nil {
-					log.Error().Err(err).Msgf("Failed to retrieve info for record ID : %d", record)
-				} else {
-					log.Debug().Msgf("ID : %d -> IP : %s", record, ip)
-				}
-			}
-			if IpinRecordList(client, recordsID, pubIP) {
-				log.Info().Msg("Public IP sucessfully found in A record")
+			rec := NewRecord("A", pubIPv4, 0)
+			err = addRecord(client, *rec)
+			if err != nil {
+				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
 			} else {
-				rec := NewARecord(pubIP, 0)
-				err = addARecord(client, *rec)
-				if err != nil {
-					log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
-				} else {
-					log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
-				}
+				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+			}
+		}
+		// IPv6 check
+		IPv6List, err := PollRecords(client, "AAAA")
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get AAAA records list")
+			continue
+		}
+		if slices.Contains(IPv6List, pubIPv6) {
+			log.Info().Msg("Public IPv6 sucessfully found in AAAA record")
+		} else {
+			rec := NewRecord("AAAA", pubIPv6, 0)
+			err := addRecord(client, *rec)
+			if err != nil {
+				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+			} else {
+				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
 			}
 		}
 		<-ticker.C
