@@ -32,8 +32,15 @@ func getEnv(key string) (string, error) {
 	return value, nil
 }
 
-func getPublicIPv4() (string, error) {
-	resp, err := http.Get("https://api.ipify.org?format=json")
+func getPublicIP(v6 bool) (string, error) {
+	var resp *http.Response
+	var err error
+	if v6 {
+		resp, err = http.Get("https://api6.ipify.org?format=json")
+	} else {
+		resp, err = http.Get("https://api.ipify.org?format=json")
+	}
+
 	if err != nil {
 		return "", err
 	}
@@ -158,9 +165,13 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to create OVH client")
 	}
 
-	pubIPv4, err := getPublicIPv4()
+	pubIPv4, err := getPublicIP(false)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to get public IP")
+		log.Error().Err(err).Msg("Failed to get public IPv4")
+	}
+	pubIPv6, err := getPublicIP(true)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get public IPv6")
 	}
 
 	log.Info().Str("ip", pubIPv4).Msg("Public IPv4 found")
@@ -195,6 +206,23 @@ func main() {
 		} else {
 			rec := NewRecord("A", pubIPv4, 0)
 			err = addRecord(client, *rec)
+			if err != nil {
+				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+			} else {
+				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+			}
+		}
+		// IPv6 check
+		IPv6List, err := PollRecords(client, "AAAA")
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get AAAA records list")
+			continue
+		}
+		if slices.Contains(IPv6List, pubIPv6) {
+			log.Info().Msg("Public IPv6 sucessfully found in AAAA record")
+		} else {
+			rec := NewRecord("AAAA", pubIPv6, 0)
+			err := addRecord(client, *rec)
 			if err != nil {
 				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
 			} else {
