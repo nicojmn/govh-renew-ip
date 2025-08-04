@@ -84,4 +84,4 @@ docker build -t your_image_name .
 - [x] Docker setup
 - [x] Github Actions setup
 - [] Update record instead of adding it
-- [] Add support for AAAA records
+- [x] Add support for AAAA records
