@@ -165,14 +165,6 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to create OVH client")
 	}
 
-	pubIPv4, err := getPublicIP(false)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get public IPv4")
-	}
-	pubIPv6, err := getPublicIP(true)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get public IPv6")
-	}
 
 	log.Info().Str("ip", pubIPv4).Msg("Public IPv4 found")
 
@@ -195,6 +187,16 @@ func main() {
 	defer ticker.Stop()
 
 	for {
+		// Poll IPs
+		pubIPv4, err := getPublicIP(false)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get public IPv4")
+		}
+		pubIPv6, err := getPublicIP(true)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get public IPv6")
+		}
+		
 		// IPv4 check
 		IPv4List, err := PollRecords(client, "A")
 		if err != nil {
@@ -212,6 +214,7 @@ func main() {
 				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
 			}
 		}
+		
 		// IPv6 check
 		IPv6List, err := PollRecords(client, "AAAA")
 		if err != nil {
@@ -229,6 +232,7 @@ func main() {
 				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
 			}
 		}
+		
 		<-ticker.C
 	}
 }
