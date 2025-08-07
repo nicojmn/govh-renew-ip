@@ -91,7 +91,7 @@ The script performs the following operations :
 
 - Dynamic DNS services are great, but they are not always free or easy to set up.
 - ISPs may have weird rules or behaviors
-- This script is lightweight, 
+- This script is lightweight, fast and easy to use.
 
 
 
