@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"slices"
 	"strconv"
 	"time"
 
@@ -15,11 +14,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type record struct {
+type record struct { // for client requests
 	FieldType string `json:"fieldType"`
 	Subdomain string `json:"subDomain"`
 	Target    string `json:"target"`
 	Ttl       int    `json:"ttl"`
+}
+
+type recAndID struct { // for our inner usage
+	FieldType string
+	Subdomain string
+	Target    string
+	Ttl       int
+	Id        int
 }
 
 func getEnv(key string) (string, error) {
@@ -93,31 +100,50 @@ func NewOVHClient() (*ovh.Client, error) {
 
 }
 
-func IDToIP(client *ovh.Client, id int) (string, error) {
+func IDToRecord(client *ovh.Client, id int) (record, error) {
 	var info record
 	err := client.Get(fmt.Sprintf("/domain/zone/%s/record/%d", os.Getenv("DOMAIN"), id), &info)
 	if err != nil {
-		return "", err
+		return record{}, err
 	}
-	return info.Target, nil
+	return info, nil
 }
 
-func addRecord(client *ovh.Client, rec record) error {
+func PostNewRecord(client *ovh.Client, rec record) error {
 	var resp record
 	err := client.Post(fmt.Sprintf("/domain/zone/%s/record", os.Getenv("DOMAIN")), rec, &resp)
 	if err != nil {
 		return err
 	}
-	err = client.Post(fmt.Sprintf("/domain/zone/%s/refresh", os.Getenv("DOMAIN")), nil, nil)
+
+	err = RefreshZone(client)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func NewRecord(fieldType string, target string, ttl int) *record {
+func UpdateRecord(client *ovh.Client, rec record, id int) error {
+	var resp record
+	err := client.Put(fmt.Sprintf("/domain/zone/%s/record/%d", os.Getenv("DOMAIN"), id), rec, resp)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func RefreshZone(client *ovh.Client) error {
+	err := client.Post(fmt.Sprintf("/domain/zone/%s/refresh", os.Getenv("DOMAIN")), nil, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func NewRecord(fieldType string, subDomain string, target string, ttl int) *record {
 	return &record{
 		FieldType: fieldType,
+		Subdomain: subDomain,
 		Target:    target,
 		Ttl:       ttl,
 	}
@@ -136,24 +162,31 @@ func ConnAttempt(client *ovh.Client) error {
 	return nil
 }
 
-func PollRecords(client *ovh.Client, fieldType string) ([]string, error) {
+func PollRecords(client *ovh.Client, fieldType string, pubIP string) ([]recAndID, error) {
 	var recordsIDs []int
-	var IPs []string
+	var records []recAndID
 	err := client.Get(fmt.Sprintf("/domain/zone/%s/record?fieldType=%s", os.Getenv("DOMAIN"), fieldType), &recordsIDs)
 	if err != nil {
 		return nil, err
 	}
-	for _, record := range recordsIDs {
-		log.Debug().Int("ID", record).Msg("Record ID found")
-		ip, err := IDToIP(client, record)
+	for _, id := range recordsIDs {
+		rec, err := IDToRecord(client, id)
 		if err != nil {
-			log.Error().Err(err).Msgf("Failed to retrieve info for record ID : %d", record)
+			log.Error().Err(err).Msgf("Failed to retrieve info for record ID : %d", id)
 		} else {
-			IPs = append(IPs, ip)
-			log.Debug().Msgf("ID : %d -> IP : %s", record, ip)
+			if rec.Target == pubIP {
+				records = append(records, recAndID{
+					FieldType: rec.FieldType,
+					Subdomain: rec.Subdomain,
+					Target:    rec.Target,
+					Ttl:       rec.Ttl,
+					Id:        id,
+				})
+				log.Debug().Str("type", rec.FieldType).Str("Subdomain", rec.Subdomain).Str("IP", rec.Target).Msg("Matching record found")
+			}
 		}
 	}
-	return IPs, nil
+	return records, nil
 }
 
 func main() {
@@ -164,9 +197,6 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create OVH client")
 	}
-
-
-	log.Info().Str("ip", pubIPv4).Msg("Public IPv4 found")
 
 	err = ConnAttempt(client)
 	if err != nil {
@@ -183,6 +213,9 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to convert time interval to int")
 	}
 
+	var previousA []recAndID    // records with public IPv4
+	var previousAAAA []recAndID // same for IPv6
+
 	ticker := time.NewTicker(time.Duration(timeInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -196,43 +229,79 @@ func main() {
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get public IPv6")
 		}
-		
+
 		// IPv4 check
-		IPv4List, err := PollRecords(client, "A")
+		ARecords, err := PollRecords(client, "A", pubIPv4)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get A records list")
 			continue
 		}
-		if slices.Contains(IPv4List, pubIPv4) {
+		if len(ARecords) == 0 {
+			// We need to update the previously found record
+			if len(previousA) == 0 {
+				rec := NewRecord("A", "", pubIPv4, 0)
+				err = PostNewRecord(client, *rec)
+				if err != nil {
+					log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+				} else {
+					log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+				}
+			} else {
+				for _, prev := range previousA {
+					rec := NewRecord(prev.FieldType, prev.Subdomain, pubIPv4, prev.Ttl)
+					err = UpdateRecord(client, *rec, prev.Id)
+					if err != nil {
+						log.Error().Err(err).Str("type", prev.FieldType).Str("Subdomain", prev.Subdomain).Str("IP", prev.Target).Msg("Failed to update record")
+					} else {
+						log.Debug().Int("ID", prev.Id).Str("Type", prev.FieldType).Str("Subdomain", prev.Subdomain).Msg("Sucessfully updated record")
+					}
+				}
+				err = RefreshZone(client)
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to refresh DNS zone")
+				}
+			}
+		} else {
+			previousA = ARecords
 			log.Info().Msg("Public IPv4 sucessfully found in A record")
-		} else {
-			rec := NewRecord("A", pubIPv4, 0)
-			err = addRecord(client, *rec)
-			if err != nil {
-				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
-			} else {
-				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
-			}
 		}
-		
+
 		// IPv6 check
-		IPv6List, err := PollRecords(client, "AAAA")
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to get AAAA records list")
-			continue
+		AAAARecords, err := PollRecords(client, "AAAA", pubIPv6)
+		for _, t := range AAAARecords {
+			log.Debug().Msgf("%s in AAAA records", t.Subdomain)
 		}
-		if slices.Contains(IPv6List, pubIPv6) {
-			log.Info().Msg("Public IPv6 sucessfully found in AAAA record")
-		} else {
-			rec := NewRecord("AAAA", pubIPv6, 0)
-			err := addRecord(client, *rec)
-			if err != nil {
-				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+		if len(AAAARecords) == 0 {
+			// We need to update the previously found record
+			if len(previousAAAA) == 0 {
+				rec := NewRecord("AAAA", "", pubIPv6, 0)
+				err = PostNewRecord(client, *rec)
+				if err != nil {
+					log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+				} else {
+					log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+				}
 			} else {
-				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+				for _, prev := range previousAAAA {
+					rec := NewRecord(prev.FieldType, prev.Subdomain, pubIPv6, prev.Ttl)
+					err = UpdateRecord(client, *rec, prev.Id)
+					if err != nil {
+						log.Error().Err(err).Str("type", rec.FieldType).Str("Subdomain", rec.Subdomain).Str("IP", rec.Target).Msg("Failed to update record")
+					} else {
+						log.Debug().Int("ID", prev.Id).Str("Type", prev.FieldType).Str("Subdomain", prev.Subdomain).Msg("Sucessfully updated record")
+					}
+				}
+				err = RefreshZone(client)
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to refresh DNS zone")
+				}
 			}
+		} else {
+			previousAAAA = AAAARecords
+			log.Info().Msg("Public IPv6 sucessfully found in A record")
 		}
-		
+
+		log.Debug()
 		<-ticker.C
 	}
 }
