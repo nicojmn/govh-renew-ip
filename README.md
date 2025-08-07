@@ -83,5 +83,6 @@ docker build -t your_image_name .
 - [x] Add record when the IP address is not found
 - [x] Docker setup
 - [x] Github Actions setup
-- [] Update record instead of adding it
+- [ ] Update record instead of adding it
 - [x] Add support for AAAA records
+- [ ] Modify all records matching target instead of base domain
