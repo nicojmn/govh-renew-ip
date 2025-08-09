@@ -105,3 +105,5 @@ The script performs the following operations :
 - [x] Update record instead of adding it
 - [x] Add support for AAAA records
 - [x] Handle subdomains
+- [ ] Refactor env variables
+- [ ] Handle signals to stop the script gracefully
