@@ -192,6 +192,46 @@ func PollRecords(client *ovh.Client, fieldType string, pubIP string) ([]recAndID
 	return records, nil
 }
 
+func ManageRecords(client *ovh.Client, previous []recAndID, fieldType string, pubIP string) ([]recAndID, error) {
+	records, err := PollRecords(client, fieldType, pubIP)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to get %s records list", fieldType)
+		return nil, err
+	}
+
+	if len(records) == 0 {
+		if len(previous) == 0 {
+			rec := NewRecord(fieldType, "", pubIP, 0)
+			err = PostNewRecord(client, *rec)
+			if err != nil {
+				log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
+				return nil, err
+			} else {
+				log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
+			}
+		} else {
+			for _, prev := range previous {
+				rec := NewRecord(prev.FieldType, prev.Subdomain, pubIP, prev.Ttl)
+				err := UpdateRecord(client, *rec, prev.Id)
+				if err != nil {
+					log.Error().Err(err).Str("type", prev.FieldType).Str("Subdomain", prev.Subdomain).Str("IP", prev.Target).Msg("Failed to update record")
+				} else {
+					log.Debug().Int("ID", prev.Id).Str("Type", prev.FieldType).Str("Subdomain", prev.Subdomain).Msg("Sucessfully updated record")
+				}
+			}
+			err := RefreshZone(client)
+			if err != nil {
+				log.Error().Err(err).Msg("Failed to refresh DNS zone")
+			}
+			log.Info().Msgf("Updated %s records with new public IP [%s]", fieldType, pubIP)
+		}
+	} else {
+		log.Info().Msgf("Public ip [%s] successfully found in %s record(s)", pubIP, fieldType)
+		previous = records
+	}
+	return previous, nil
+}
+
 func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
@@ -242,76 +282,10 @@ func main() {
 				log.Error().Err(err).Msg("Failed to get public IPv6")
 			}
 
-			// IPv4 check
-			ARecords, err := PollRecords(client, "A", pubIPv4)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to get A records list")
-				continue
-			}
-			if len(ARecords) == 0 {
-				// We need to update the previously found record
-				if len(previousA) == 0 {
-					rec := NewRecord("A", "", pubIPv4, 0)
-					err = PostNewRecord(client, *rec)
-					if err != nil {
-						log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
-					} else {
-						log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
-					}
-				} else {
-					for _, prev := range previousA {
-						rec := NewRecord(prev.FieldType, prev.Subdomain, pubIPv4, prev.Ttl)
-						err = UpdateRecord(client, *rec, prev.Id)
-						if err != nil {
-							log.Error().Err(err).Str("type", prev.FieldType).Str("Subdomain", prev.Subdomain).Str("IP", prev.Target).Msg("Failed to update record")
-						} else {
-							log.Debug().Int("ID", prev.Id).Str("Type", prev.FieldType).Str("Subdomain", prev.Subdomain).Msg("Sucessfully updated record")
-						}
-					}
-					err = RefreshZone(client)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to refresh DNS zone")
-					}
-				}
-			} else {
-				previousA = ARecords
-				log.Info().Msg("Public IPv4 sucessfully found in A record")
-			}
+			// Handle records
+			previousA, _ = ManageRecords(client, previousA, "A", pubIPv4)
+			previousAAAA, _ = ManageRecords(client, previousAAAA, "AAAA", pubIPv6)
 
-			// IPv6 check
-			AAAARecords, err := PollRecords(client, "AAAA", pubIPv6)
-			for _, t := range AAAARecords {
-				log.Debug().Msgf("%s in AAAA records", t.Subdomain)
-			}
-			if len(AAAARecords) == 0 {
-				// We need to update the previously found record
-				if len(previousAAAA) == 0 {
-					rec := NewRecord("AAAA", "", pubIPv6, 0)
-					err = PostNewRecord(client, *rec)
-					if err != nil {
-						log.Error().Err(err).Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Failed to add record")
-					} else {
-						log.Info().Str("IP", rec.Target).Int("TTL", rec.Ttl).Msg("Sucessfully added record")
-					}
-				} else {
-					for _, prev := range previousAAAA {
-						rec := NewRecord(prev.FieldType, prev.Subdomain, pubIPv6, prev.Ttl)
-						err = UpdateRecord(client, *rec, prev.Id)
-						if err != nil {
-							log.Error().Err(err).Str("type", rec.FieldType).Str("Subdomain", rec.Subdomain).Str("IP", rec.Target).Msg("Failed to update record")
-						} else {
-							log.Debug().Int("ID", prev.Id).Str("Type", prev.FieldType).Str("Subdomain", prev.Subdomain).Msg("Sucessfully updated record")
-						}
-					}
-					err = RefreshZone(client)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to refresh DNS zone")
-					}
-				}
-			} else {
-				previousAAAA = AAAARecords
-				log.Info().Msg("Public IPv6 sucessfully found in A record")
-			}
 		case <-ctx.Done():
 			log.Info().Msg("Closing program")
 			return
