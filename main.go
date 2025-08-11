@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/akamensky/argparse"
 	"github.com/ovh/go-ovh/ovh"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -233,8 +234,28 @@ func ManageRecords(client *ovh.Client, previous []recAndID, fieldType string, pu
 }
 
 func main() {
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	parser := argparse.NewParser("govh-renew-ip", "Bite")
+	logLevel := parser.Int("d", "debug", &argparse.Options{
+		Required: false,
+		Help:     "Select level logging, more info at https://github.com/rs/zerolog?tab=readme-ov-file#leveled-logging",
+		Validate: func(args []string) error {
+			level, err := strconv.Atoi(args[0])
+			if err != nil || level < -1 || level > 5 {
+				log.Fatal().Err(err).Msgf("Log level must be between -1 and 5, got %d", level)
+			}
+			return nil
+		},
+		Default: 1,
+	})
+
+	err := parser.Parse(os.Args)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to parse args")
+	}
+
+	zerolog.SetGlobalLevel(zerolog.Level(*logLevel))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
