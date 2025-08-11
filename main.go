@@ -35,6 +35,15 @@ type recAndID struct { // for our inner usage
 
 var domain string
 
+// getEnv retrieves the value of the specified environment variable.
+// If the environment variable is not set or is empty, it returns an error
+// indicating that the variable is required.
+//
+// Parameters:
+//   key - the name of the environment variable to retrieve.
+//
+// Returns:
+//   The value of the environment variable, or an error if it is not set.
 func getEnv(key string) (string, error) {
 	value := os.Getenv(key)
 
@@ -45,6 +54,11 @@ func getEnv(key string) (string, error) {
 	return value, nil
 }
 
+// getPublicIP retrieves the public IP address of the host machine.
+// If v6 is true, it fetches the IPv6 address using the api6.ipify.org service.
+// If v6 is false, it fetches the IPv4 address using the api.ipify.org service.
+// The function returns the IP address as a string, or an error if the request fails,
+// the response status is not OK, or the IP is not found in the response.
 func getPublicIP(v6 bool) (string, error) {
 	var resp *http.Response
 	var err error
@@ -76,6 +90,11 @@ func getPublicIP(v6 bool) (string, error) {
 	return ip, nil
 }
 
+// NewOVHClient initializes and returns a new OVH API client using credentials
+// and endpoint information retrieved from environment variables. It expects the
+// following environment variables to be set: OVH_ENDPOINT, OVH_APP_KEY,
+// OVH_APP_SECRET, and OVH_CONSUMER_KEY. If any variable is missing or invalid,
+// an error is returned. On success, it returns a pointer to an ovh.Client.
 func NewOVHClient() (*ovh.Client, error) {
 	endpoint, err := getEnv("OVH_ENDPOINT")
 	if err != nil {
@@ -106,6 +125,7 @@ func NewOVHClient() (*ovh.Client, error) {
 
 }
 
+// IDToRecord converts a record ID to a record struct by making a GET request
 func IDToRecord(client *ovh.Client, id int) (record, error) {
 	var info record
 	err := client.Get(fmt.Sprintf("/domain/zone/%s/record/%d", domain, id), &info)
@@ -115,6 +135,9 @@ func IDToRecord(client *ovh.Client, id int) (record, error) {
 	return info, nil
 }
 
+// PostNewRecord creates a new DNS record in the specified domain zone using the provided OVH client and record data.
+// After successfully posting the new record, it refreshes the DNS zone to apply the changes.
+// Returns an error if the record creation or zone refresh fails.
 func PostNewRecord(client *ovh.Client, rec record) error {
 	var resp record
 	err := client.Post(fmt.Sprintf("/domain/zone/%s/record", domain), rec, &resp)
@@ -129,7 +152,11 @@ func PostNewRecord(client *ovh.Client, rec record) error {
 	return nil
 }
 
+// UpdateRecord updates a DNS record in the specified domain zone using the provided OVH client.
+// It sends a PUT request to the OVH API to update the record with the given ID and record data.
+// Returns an error if the update operation fails.
 func UpdateRecord(client *ovh.Client, rec record, id int) error {
+
 	var resp record
 	err := client.Put(fmt.Sprintf("/domain/zone/%s/record/%d", domain, id), rec, resp)
 	if err != nil {
@@ -138,6 +165,9 @@ func UpdateRecord(client *ovh.Client, rec record, id int) error {
 	return nil
 }
 
+// RefreshZone triggers a refresh of the DNS zone for the specified domain using the provided OVH client.
+// It sends a POST request to the OVH API to update the zone records.
+// Returns an error if the API request fails.
 func RefreshZone(client *ovh.Client) error {
 	err := client.Post(fmt.Sprintf("/domain/zone/%s/refresh", domain), nil, nil)
 	if err != nil {
@@ -146,6 +176,14 @@ func RefreshZone(client *ovh.Client) error {
 	return nil
 }
 
+// NewRecord creates and returns a new DNS record with the specified field type, subdomain, target, and TTL.
+// Parameters:
+//   - fieldType: The type of DNS record (e.g., "A", "CNAME").
+//   - subDomain: The subdomain for the DNS record.
+//   - target: The target value for the DNS record (e.g., IP address or domain).
+//   - ttl: The time-to-live value for the DNS record.
+// Returns:
+//   - A pointer to the newly created record.
 func NewRecord(fieldType string, subDomain string, target string, ttl int) *record {
 	return &record{
 		FieldType: fieldType,
@@ -155,6 +193,9 @@ func NewRecord(fieldType string, subDomain string, target string, ttl int) *reco
 	}
 }
 
+// ConnAttempt tests the connection to the OVH API by retrieving the user's information.
+// It sends a GET request to the "/me" endpoint and unmarshals the response into a PartialMe struct.
+// If the request fails, it returns an error; otherwise, it returns nil indicating a successful connection.
 func ConnAttempt(client *ovh.Client) error {
 	type PartialMe struct {
 		Firstname string `json:"firstname"`
@@ -168,6 +209,10 @@ func ConnAttempt(client *ovh.Client) error {
 	return nil
 }
 
+// PollRecords retrieves DNS records of a specified field type from the OVH API for the configured domain,
+// filtering them to include only those whose target matches the provided public IP address.
+// It returns a slice of recAndID structs containing details of the matching records and their IDs.
+// If an error occurs during the API call, it returns nil and the error.
 func PollRecords(client *ovh.Client, fieldType string, pubIP string) ([]recAndID, error) {
 	var recordsIDs []int
 	var records []recAndID
@@ -195,6 +240,22 @@ func PollRecords(client *ovh.Client, fieldType string, pubIP string) ([]recAndID
 	return records, nil
 }
 
+// ManageRecords manages DNS records for a given field type and public IP address.
+// It polls existing records and updates or creates them as necessary.
+// If no records exist and there are no previous records, it creates a new record.
+// If previous records exist but no current records match, it updates the previous records with the new public IP.
+// After updating, it refreshes the DNS zone.
+// Returns the updated list of records and any error encountered.
+//
+// Parameters:
+//   client    - OVH API client used for DNS operations.
+//   previous  - Slice of previous DNS records and their IDs.
+//   fieldType - DNS record type (e.g., "A", "AAAA").
+//   pubIP     - Public IP address to set in the DNS records.
+//
+// Returns:
+//   []recAndID - Updated slice of DNS records and their IDs.
+//   error      - Error encountered during the operation, if any.
 func ManageRecords(client *ovh.Client, previous []recAndID, fieldType string, pubIP string) ([]recAndID, error) {
 	records, err := PollRecords(client, fieldType, pubIP)
 	if err != nil {
