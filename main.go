@@ -33,6 +33,8 @@ type recAndID struct { // for our inner usage
 	Id        int
 }
 
+var domain string
+
 func getEnv(key string) (string, error) {
 	value := os.Getenv(key)
 
@@ -106,7 +108,7 @@ func NewOVHClient() (*ovh.Client, error) {
 
 func IDToRecord(client *ovh.Client, id int) (record, error) {
 	var info record
-	err := client.Get(fmt.Sprintf("/domain/zone/%s/record/%d", os.Getenv("DOMAIN"), id), &info)
+	err := client.Get(fmt.Sprintf("/domain/zone/%s/record/%d", domain, id), &info)
 	if err != nil {
 		return record{}, err
 	}
@@ -115,7 +117,7 @@ func IDToRecord(client *ovh.Client, id int) (record, error) {
 
 func PostNewRecord(client *ovh.Client, rec record) error {
 	var resp record
-	err := client.Post(fmt.Sprintf("/domain/zone/%s/record", os.Getenv("DOMAIN")), rec, &resp)
+	err := client.Post(fmt.Sprintf("/domain/zone/%s/record", domain), rec, &resp)
 	if err != nil {
 		return err
 	}
@@ -129,7 +131,7 @@ func PostNewRecord(client *ovh.Client, rec record) error {
 
 func UpdateRecord(client *ovh.Client, rec record, id int) error {
 	var resp record
-	err := client.Put(fmt.Sprintf("/domain/zone/%s/record/%d", os.Getenv("DOMAIN"), id), rec, resp)
+	err := client.Put(fmt.Sprintf("/domain/zone/%s/record/%d", domain, id), rec, resp)
 	if err != nil {
 		return err
 	}
@@ -137,7 +139,7 @@ func UpdateRecord(client *ovh.Client, rec record, id int) error {
 }
 
 func RefreshZone(client *ovh.Client) error {
-	err := client.Post(fmt.Sprintf("/domain/zone/%s/refresh", os.Getenv("DOMAIN")), nil, nil)
+	err := client.Post(fmt.Sprintf("/domain/zone/%s/refresh", domain), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -169,7 +171,7 @@ func ConnAttempt(client *ovh.Client) error {
 func PollRecords(client *ovh.Client, fieldType string, pubIP string) ([]recAndID, error) {
 	var recordsIDs []int
 	var records []recAndID
-	err := client.Get(fmt.Sprintf("/domain/zone/%s/record?fieldType=%s", os.Getenv("DOMAIN"), fieldType), &recordsIDs)
+	err := client.Get(fmt.Sprintf("/domain/zone/%s/record?fieldType=%s", domain, fieldType), &recordsIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +268,11 @@ func main() {
 		log.Info().Str("signal", sig.String()).Msg("Received termination signal")
 		cancel()
 	}()
+
+	domain, err = getEnv("DOMAIN")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to get DOMAIN env variable")
+	}
 
 	client, err := NewOVHClient()
 	if err != nil {
