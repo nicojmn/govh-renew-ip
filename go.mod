@@ -3,6 +3,7 @@ module github.com/nicojmn/govh-renew-ip
 go 1.24.2
 
 require (
+	github.com/akamensky/argparse v1.4.0
 	github.com/ovh/go-ovh v1.7.0
 	github.com/rs/zerolog v1.34.0
 )

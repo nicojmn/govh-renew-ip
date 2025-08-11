@@ -6,7 +6,7 @@ a docker container but you can use it on any flavour you like.
 ## Prerequisites
 
 - A domain name registered with OVH
-- OVH API credentials ([Find it here](https://api.ovh.com/createToken/))
+- OVH API credentials, with GET, PUT and POST permissions ([Find it here](https://api.ovh.com/createToken/))
 
 ## Configuration
 
@@ -105,5 +105,5 @@ The script performs the following operations :
 - [x] Update record instead of adding it
 - [x] Add support for AAAA records
 - [x] Handle subdomains
-- [ ] Refactor env variables
-- [ ] Handle signals to stop the script gracefully
+- [x] Refactor env variables
+- [x] Handle signals to stop the script gracefully
