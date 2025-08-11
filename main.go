@@ -294,26 +294,30 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to convert time interval to int")
 	}
 
-	var previousA []recAndID    // records with public IPv4
-	var previousAAAA []recAndID // same for IPv6
+	var previousRecs = map[string][]recAndID{
+		"A":    {},
+		"AAAA": {},
+	}
 
 	for {
 		select {
 		case <-time.After(time.Duration(timeInterval) * time.Second):
-			// Poll IPs
-			pubIPv4, err := getPublicIP(false)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to get public IPv4")
-			}
-			pubIPv6, err := getPublicIP(true)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to get public IPv6")
-			}
+			for _, fieldType := range []string{"A", "AAAA"} {
+				// Poll public IP
+				pubIP, err := getPublicIP(fieldType == "AAAA")
+				if err != nil {
+					log.Error().Err(err).Msgf("Failed to get public IP for type %s", fieldType)
+					continue
+				}
+				// Manage records
+				records, err := ManageRecords(client, previousRecs[fieldType], fieldType, pubIP)
+				if err != nil {
+					log.Error().Err(err).Msgf("Failed to manage %s records", fieldType)
+					continue
+				}
+				previousRecs[fieldType] = records
 
-			// Handle records
-			previousA, _ = ManageRecords(client, previousA, "A", pubIPv4)
-			previousAAAA, _ = ManageRecords(client, previousAAAA, "AAAA", pubIPv6)
-
+			}
 		case <-ctx.Done():
 			log.Info().Msg("Closing program")
 			return
